@@ -2,6 +2,7 @@ const express = require('express');
 const app = express();
 const Database = require('better-sqlite3');
 const db = new Database('tasks.db');
+const idempotencyStore = new Map();
 
 db.exec(`
   CREATE TABLE IF NOT EXISTS tasks (
@@ -26,11 +27,30 @@ app.get('/bye', (req, res) => {
 })
 
 app.get('/tasks', (req, res) => {
-    const allTasks = db.prepare('Select * FROM tasks').all();
-    res.send(allTasks);
+    const limit = 10;
+    const after = req.query.after ? Number(req.query.after) : 0;
+
+    const tasks = db.prepare('Select * FROM tasks WHERE id > ? ORDER BY id LIMIT ?').all(after, limit);
+    res.send(tasks);
+});
+
+app.get('/tasks-offset', (req, res) => {
+    const limit = 5;
+    const page = Number(req.query.page) || 1;
+    const offsetVal = (page - 1) * limit;
+
+    const tasks = db.prepare('SELECT * FROM tasks ORDER BY id LIMIT ? OFFSET ?').all(limit, offsetVal);
+    res.send(tasks);
 });
 
 app.post('/tasks', (req, res) => {
+    const idempotencyKey = req.headers['idempotency-key'];
+
+    if(idempotencyKey && idempotencyStore.has(idempotencyKey)){
+        const cachedResponse = idempotencyStore.get(idempotencyKey);
+        return res.status(cachedResponse.status).send(cachedResponse.body);
+    }
+
     if(typeof req.body.title !== 'string' || req.body.title.trim() === ''){
         return res.status(400).send('Title must be a non-empty string');
     }
@@ -38,6 +58,10 @@ app.post('/tasks', (req, res) => {
 
     const result = db.prepare('INSERT INTO tasks (title) VALUES (?)').run(req.body.title);
     const newTask = db.prepare('SELECT * FROM tasks WHERE id = ?').get(result.lastInsertRowid);
+
+    if(idempotencyKey){
+       idempotencyStore.set(idempotencyKey, {status: 201, body: newTask});
+    }
 
     res.status(201).send(newTask);
 });
