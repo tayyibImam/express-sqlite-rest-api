@@ -26,12 +26,31 @@ app.get('/bye', (req, res) => {
     res.send("good bye from my api!");
 })
 
-app.get('/tasks', (req, res) => {
-    const limit = 10;
-    const after = req.query.after ? Number(req.query.after) : 0;
+let tasksCache = null;
 
-    const tasks = db.prepare('Select * FROM tasks WHERE id > ? ORDER BY id LIMIT ?').all(after, limit);
+app.get('/v1/tasks', (req, res) => {
+    if (tasksCache) {
+        console.log('Serving from cache');
+        return res.send(tasksCache);
+    }
+
+    console.log('Cache miss — querying database');
+    const after = req.query.after ? Number(req.query.after) : 0;
+    const limit = 5;
+    const tasks = db.prepare('SELECT * FROM tasks WHERE id > ? ORDER BY id LIMIT ?').all(after, limit);
+
+    tasksCache = tasks;
     res.send(tasks);
+});
+
+app.get('/v2/tasks', (req, res) => {
+    const after = req.query.after ? Number(req.query.after) : 0;
+    const limit = 5;
+    const tasks = db.prepare('SELECT * FROM tasks WHERE id > ? ORDER BY id LIMIT ?').all(after, limit);
+
+    // reshape the data for v2 clients, without touching the database or v1
+    const reshaped = tasks.map(t => ({ id: t.id, name: t.title }));
+    res.send(reshaped);
 });
 
 app.get('/tasks-offset', (req, res) => {
@@ -43,7 +62,7 @@ app.get('/tasks-offset', (req, res) => {
     res.send(tasks);
 });
 
-app.post('/tasks', (req, res) => {
+app.post('/v1/tasks', (req, res) => {
     const idempotencyKey = req.headers['idempotency-key'];
 
     if(idempotencyKey && idempotencyStore.has(idempotencyKey)){
@@ -62,6 +81,8 @@ app.post('/tasks', (req, res) => {
     if(idempotencyKey){
        idempotencyStore.set(idempotencyKey, {status: 201, body: newTask});
     }
+
+    tasksCache = null;  // invalidate — force the next GET to rebuild it
 
     res.status(201).send(newTask);
 });
@@ -89,10 +110,12 @@ app.put('/tasks/:id', (req, res) => {
 
     db.prepare('UPDATE tasks SET title = ? WHERE id = ?').run(req.body.title, req.params.id)
     const updatedTask = db.prepare('SELECT * FROM tasks WHERE id = ?').get(req.params.id);
+    tasksCache = null;  // invalidate — force the next GET to rebuild it
     res.send(updatedTask);
+
 });
 
-app.delete('/tasks/:id', (req, res) => {
+app.delete('/v1/tasks/:id', (req, res) => {
 
     const task = db.prepare('SELECT * from tasks WHERE id = ?').get(req.params.id);
 
@@ -102,8 +125,10 @@ app.delete('/tasks/:id', (req, res) => {
     }
 
     db.prepare('DELETE FROM tasks WHERE id = ?').run(req.params.id)
+    tasksCache = null;  // invalidate — force the next GET to rebuild it
     res.send("Deleted");
 });
+
 
 app.use((err, req, res, next) => {
     console.log(err.stack);

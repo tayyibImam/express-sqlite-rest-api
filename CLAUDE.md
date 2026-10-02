@@ -19,5 +19,12 @@ This is a minimal single-file Express.js API (`index.js`) with no routing/contro
 - **Validation**: `title` must be a non-empty string after trimming; invalid input returns `400` before touching the database (see POST/PUT handlers).
 - **Error handling**: a global error-handling middleware (last `app.use`) logs the stack server-side and returns a generic `500` — route handlers should let errors propagate rather than catching and formatting them individually.
 - **Logging**: a request-logging middleware logs `METHOD URL` for every incoming request.
+- **Express 5**: errors thrown (or rejected promises) in route handlers reach the global error handler automatically — no `try/catch` or `next(err)` needed. Keep the error handler registered after all routes.
+- **Responses**: errors are sent as plain-text strings via `res.send` (not JSON); successful task responses are the DB row objects. Note `title` is validated after trimming but stored untrimmed.
+
+## Repo notes
+
+- `recap/` and `roadmap/` hold PDF learning materials (this is a learning project), not code or docs about the API.
+- `package-lock.json` is the tracked lockfile; use `npm`. An untracked `pnpm-lock.yaml` exists but isn't part of the project.
 
 This is a git repository.
